@@ -116,3 +116,15 @@ jobs:
           --configuration Release
           --no-build
           --verbosity normal
+
+      # 7. Publishing artifacts (builds) to GitHub
+      # This step collects .dll and .nupkg files (if packaging is configured) and uploads them to GitHub Actions
+      - name: Upload Build Artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VSergeValidation-v${{ env.APP_VERSION }}
+          path: |
+            **/bin/Release/net9.0/*.dll
+            **/bin/Release/net9.0/*.json
+          retention-days: 30
