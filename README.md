@@ -1,5 +1,7 @@
 # VSergeValidation
 
+[![.NET Core CI/CD](https://github.com/VSergeV1981/VSergeValidation/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/VSergeV1981/VSergeValidation/actions/workflows/ci-cd.yml)
+
 A flexible, component-based validation engine for .NET applications. The system utilizes interfaces and the Strategy design pattern to clean isolate, encapsulate, and centrally manage validation logic for various data types including text, numbers, dates, and enumerations.
 
 ---
@@ -323,4 +325,3 @@ class Program
 
 ```
 ---
-[![.NET Core CI/CD](https://github.com)](https://github.com)
