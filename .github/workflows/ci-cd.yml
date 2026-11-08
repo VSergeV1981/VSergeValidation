@@ -12,6 +12,10 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    
+    # Explicitly grant write access to repository contents to allow release and tag creation
+    permissions:
+      contents: write
 
     steps:
       # 1. Checkout repository with complete Git history
@@ -27,7 +31,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Configure Git safe directory
+          # Configure Git safe directory to bypass ownership restrictions on the runner
           git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
 
           # Current UTC date
@@ -39,7 +43,7 @@ jobs:
           # First day of current month
           $startOfMonthIso = "$($nowUtc.ToString('yyyy-MM'))-01T00:00:00Z"
 
-          # Select reference
+          # Select reference pointer
           $targetRef = "HEAD"
 
           if ("${{ github.event_name }}" -eq "pull_request") {
@@ -75,12 +79,12 @@ jobs:
           # Format counter
           $formattedCommits = $commitCount.ToString().PadLeft(4, '0')
 
-          # Assemble version
+          # Assemble version string
           $computedVersion = "$year.$month.$formattedCommits"
 
           Write-Host "Calculated Application Version: v.$computedVersion"
 
-          # Export environment variable using UTF-8 without BOM
+          # Export environment variable using UTF-8 without BOM to prevent parsing issues
           $envContent = "APP_VERSION=$computedVersion" + [Environment]::NewLine
 
           [System.IO.File]::AppendAllText(
