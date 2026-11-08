@@ -117,8 +117,7 @@ jobs:
           --no-build
           --verbosity normal
 
-      # 7. Publishing artifacts (builds) to GitHub
-      # This step collects .dll and .nupkg files (if packaging is configured) and uploads them to GitHub Actions
+      # 7.1. Publishing artifacts (builds) to GitHub Actions Storage
       - name: Upload Build Artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
@@ -128,3 +127,24 @@ jobs:
             **/bin/Release/net9.0/*.dll
             **/bin/Release/net9.0/*.json
           retention-days: 30
+          
+      # 7.2. Collect and structure binary assets for release packaging
+      - name: Prepare Release Files
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          mkdir staging
+          cp VSergeValidation/bin/Release/net9.0/VSergeValidation.dll staging/
+          cd staging && zip -r ../VSergeValidation-v${{ env.APP_VERSION }}.zip .
+
+      # 8. Create formal GitHub Release and publish binary packages dynamically
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          name: Release v${{ env.APP_VERSION }}
+          files: VSergeValidation-v${{ env.APP_VERSION }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
