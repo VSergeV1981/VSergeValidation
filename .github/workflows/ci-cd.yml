@@ -1,83 +1,117 @@
+```yaml
 name: .NET Core CI/CD
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: ["main", "develop"]
+
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Check out the repository with the FULL commit history
-    # 'fetch-depth: 0' is mandatory so that 'git rev-list' can count all commits
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      # 1. Checkout repository with complete Git history
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    # 2. Calculate dynamic version: yy.MM.000X
-    - name: Generate Dynamic Version
-      id: get_version
-      shell: pwsh
-      run: |
-        # Bypass Git security warnings regarding directory ownership on Linux runners
-        git config --global --add safe.directory $env:GITHUB_WORKSPACE
-        
-        # Retrieve the current UTC time to avoid time zone discrepancies on the servers
-        $nowUtc = [DateTime]::UtcNow
-        $year = $nowUtc.ToString("yy")
-        $month = $nowUtc.ToString("MM")
-        
-        # Define the first day of the current month in ISO format (UTC)
-        $startOfMonthIso = "$($nowUtc.ToString("yyyy-MM"))-01T00:00:00Z"
-        
-        # Determine the correct reference pointer without relying on remote origin paths
-        $targetRef = "HEAD"
-        if ("${{ github.event_name }}" -eq "pull_request") {
-            # Use the first parent commit if dealing with GitHub's ephemeral merge commit
-            $targetRef = "HEAD^1"
-        }
-        
-        # Count the number of commits in the current month using the validated local reference
-        $commitCount = 0
-        try {
-            $commitCount = (git rev-list --count --since="$startOfMonthIso" $targetRef)
-        } catch {
-            # Fallback to HEAD if parent resolution fails unexpectedly
-            $commitCount = (git rev-list --count --since="$startOfMonthIso" HEAD)
-        }
-        
-        # If the counter is 0 (e.g., first commit of the month), set it to at least 1
-        if ($commitCount -eq 0) { $commitCount = 1 }
-        
-        # Format the commit counter to 4 digits with leading zeros (e.g., 0005)
-        $formattedCommits = $commitCount.ToString().PadLeft(4, '0')
-        
-        # Assemble the final version string
-        $computedVersion = "${year}.${month}.${formattedCommits}"
-        
-        Write-Host "Calculated Application Version: v.$computedVersion"
-        
-        # Enforce pure UTF-8 without BOM using .NET API to prevent GitHub Actions environment parsing errors
-        [System.IO.File]::AppendAllLines($env:GITHUB_ENV, [string[]]("APP_VERSION=$computedVersion"))
+      # 2. Generate dynamic application version
+      - name: Generate Dynamic Version
+        id: get_version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-    # 3. Install .NET 9 SDK
-    - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '9.0.x'
+          # Configure Git safe directory
+          git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
 
-    # 4. Restore NuGet packages
-    - name: Restore Dependencies
-      run: dotnet restore
+          # Current UTC date
+          $nowUtc = [DateTime]::UtcNow
 
-    # 5. Build the project and inject the dynamic version into the DLL/assembly
-    - name: Build Project
-      run: dotnet build --configuration Release --no-restore /p:Version=${{ env:APP_VERSION }}
+          $year = $nowUtc.ToString("yy")
+          $month = $nowUtc.ToString("MM")
 
-    # 6. Run all unit tests
-    - name: Run Tests
-      run: dotnet test --configuration Release --no-build --verbosity normal
+          # First day of current month
+          $startOfMonthIso = "$($nowUtc.ToString('yyyy-MM'))-01T00:00:00Z"
+
+          # Select reference
+          $targetRef = "HEAD"
+
+          if ("${{ github.event_name }}" -eq "pull_request") {
+              $targetRef = "HEAD^1"
+          }
+
+          # Count commits
+          $commitCount = 0
+
+          $gitOutput = & git rev-list --count --since="$startOfMonthIso" $targetRef 2>&1
+
+          if ($LASTEXITCODE -ne 0) {
+              Write-Warning "Could not count commits using $targetRef. Retrying with HEAD."
+
+              $gitOutput = & git rev-list --count --since="$startOfMonthIso" HEAD 2>&1
+
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Git commit counting failed: $gitOutput"
+              }
+          }
+
+          $commitCountText = ($gitOutput | Select-Object -Last 1).ToString().Trim()
+
+          if (-not [int]::TryParse($commitCountText, [ref]$commitCount)) {
+              throw "Invalid Git commit count: $commitCountText"
+          }
+
+          # Ensure minimum counter is 1
+          if ($commitCount -lt 1) {
+              $commitCount = 1
+          }
+
+          # Format counter
+          $formattedCommits = $commitCount.ToString().PadLeft(4, '0')
+
+          # Assemble version
+          $computedVersion = "$year.$month.$formattedCommits"
+
+          Write-Host "Calculated Application Version: v.$computedVersion"
+
+          # Export environment variable using UTF-8 without BOM
+          $envContent = "APP_VERSION=$computedVersion" + [Environment]::NewLine
+
+          [System.IO.File]::AppendAllText(
+              $env:GITHUB_ENV,
+              $envContent,
+              [System.Text.UTF8Encoding]::new($false)
+          )
+
+          Write-Host "APP_VERSION successfully exported."
+
+      # 3. Install .NET 9 SDK
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # 4. Restore NuGet dependencies
+      - name: Restore Dependencies
+        run: dotnet restore
+
+      # 5. Build application
+      - name: Build Project
+        run: >
+          dotnet build
+          --configuration Release
+          --no-restore
+          /p:Version=${{ env.APP_VERSION }}
+
+      # 6. Run unit tests
+      - name: Run Tests
+        run: >
+          dotnet test
+          --configuration Release
+          --no-build
+          --verbosity normal
