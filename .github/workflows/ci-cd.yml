@@ -34,11 +34,21 @@ jobs:
         # Define the first day of the current month in ISO format (UTC)
         $startOfMonthIso = "$($nowUtc.ToString("yyyy-MM"))-01T00:00:00Z"
         
-        # Safe fallback for Pull Requests: use target branch history instead of the detached HEAD
-        $targetRef = if ("${{ github.event_name }}" -eq "pull_request") { "origin/${{ github.base_ref }}" } else { "HEAD" }
+        # Determine the correct reference pointer without relying on remote origin paths
+        $targetRef = "HEAD"
+        if ("${{ github.event_name }}" -eq "pull_request") {
+            # Use the first parent commit if dealing with GitHub's ephemeral merge commit
+            $targetRef = "HEAD^1"
+        }
         
-        # Count the number of commits in the current month
-        $commitCount = (git rev-list --count --since="$startOfMonthIso" $targetRef)
+        # Count the number of commits in the current month using the validated local reference
+        $commitCount = 0
+        try {
+            $commitCount = (git rev-list --count --since="$startOfMonthIso" $targetRef)
+        } catch {
+            # Fallback to HEAD if parent resolution fails unexpectedly
+            $commitCount = (git rev-list --count --since="$startOfMonthIso" HEAD)
+        }
         
         # If the counter is 0 (e.g., first commit of the month), set it to at least 1
         if ($commitCount -eq 0) { $commitCount = 1 }
