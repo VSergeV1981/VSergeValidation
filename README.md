@@ -321,6 +321,6 @@ class Program
     }
 }
 
-
+```
 ---
 [![.NET Core CI/CD](https://github.com)](https://github.com)
