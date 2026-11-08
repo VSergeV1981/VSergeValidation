@@ -23,6 +23,9 @@ jobs:
       id: get_version
       shell: pwsh
       run: |
+        # Bypass Git security warnings regarding directory ownership on Linux runners
+        git config --global --add safe.directory $env:GITHUB_WORKSPACE
+        
         # Retrieve the current UTC time to avoid time zone discrepancies on the servers
         $nowUtc = [DateTime]::UtcNow
         $year = $nowUtc.ToString("yy")
@@ -31,10 +34,13 @@ jobs:
         # Define the first day of the current month in ISO format (UTC)
         $startOfMonthIso = "$($nowUtc.ToString("yyyy-MM"))-01T00:00:00Z"
         
-        # Count the number of commits in the current month
-        $commitCount = (git rev-list --count --since="$startOfMonthIso" HEAD)
+        # Safe fallback for Pull Requests: use target branch history instead of the detached HEAD
+        $targetRef = if ("${{ github.event_name }}" -eq "pull_request") { "origin/${{ github.base_ref }}" } else { "HEAD" }
         
-        # If the counter is 0 (e.g., a transient error), set it to at least 1
+        # Count the number of commits in the current month
+        $commitCount = (git rev-list --count --since="$startOfMonthIso" $targetRef)
+        
+        # If the counter is 0 (e.g., first commit of the month), set it to at least 1
         if ($commitCount -eq 0) { $commitCount = 1 }
         
         # Format the commit counter to 4 digits with leading zeros (e.g., 0005)
@@ -45,8 +51,8 @@ jobs:
         
         Write-Host "Calculated Application Version: v.$computedVersion"
         
-        # Write the version to the GitHub environment variables
-        "APP_VERSION=$computedVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Enforce pure UTF-8 without BOM using .NET API to prevent GitHub Actions environment parsing errors
+        [System.IO.File]::AppendAllLines($env:GITHUB_ENV, [string[]]("APP_VERSION=$computedVersion"))
 
     # 3. Install .NET 9 SDK
     - name: Setup .NET SDK
