@@ -1,0 +1,66 @@
+name: .NET Core CI/CD
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Clone the repository WITH the entire commit history (REQUIRED for git rev-list)
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # downloads the entire history, not just the latest commit
+
+    # 2. Calculating the version dynamically: yy.MM.000X
+    - name: Generate Dynamic Version
+      id: get_version
+      shell: pwsh
+      run: |
+        # We get the current date directly in UTC to avoid time zone shifts.
+        $nowUtc = [DateTime]::UtcNow
+        $year = $nowUtc.ToString("yy")
+        $month = $nowUtc.ToString("MM")
+        
+        # Precisely calculate the first day of the CURRENT month in UTC (00:00:00)
+        $startOfMonthIso = "$($nowUtc.ToString("yyyy-MM"))-01T00:00:00Z"
+        
+        # Count the number of commits in the current branch since the beginning of this month
+        $commitCount = (git rev-list --count --since="$startOfMonthIso" HEAD)
+        
+        # If there happen to be 0 commits (for example, in an extreme case), we guarantee at least 1.
+        if ($commitCount -eq 0) { $commitCount = 1 }
+        
+        # Format the commit counter with leading zeros to a width of 4 digits (e.g., 0005)
+        $formattedCommits = $commitCount.ToString().PadLeft(4, '0')
+        
+        # Constructing the final version string
+        $computedVersion = "${year}.${month}.${formattedCommits}"
+        
+        Write-Host "Calculated Application Version: v.$computedVersion"
+        
+        # Save the variable to GITHUB_ENV for use in subsequent steps
+        "APP_VERSION=$computedVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    # 3. Installing the .NET SDK
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+
+    # 4. Restoring dependencies
+    - name: Restore Dependencies
+      run: dotnet restore
+
+    # 5. Building the project with the integration of a dynamic version into the .NET assembly
+    - name: Build Project
+      run: dotnet build --configuration Release --no-restore /p:Version=${{ env:APP_VERSION }}
+
+    # 6. Running tests
+    - name: Run Tests
+      run: dotnet test --configuration Release --no-build --verbosity normal
