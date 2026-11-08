@@ -318,8 +318,9 @@ class Program
 
         // Scenario C: Successful Validation Path Execution
         string inputName = "Serge";
+    }
+}
 
 
 ---
-        
 [![.NET Core CI/CD](https://github.com)](https://github.com)
