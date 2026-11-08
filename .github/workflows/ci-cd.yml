@@ -1,10 +1,10 @@
+
 name: .NET Core CI/CD
 
 on:
   push:
     branches:
       - master
-
   pull_request:
     branches:
       - master
@@ -12,15 +12,14 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
-    # Explicitly grant write access to repository contents to allow release and tag creation
+
     permissions:
       contents: write
 
     steps:
-      # 1. Checkout repository with complete Git history
+      # 1. Checkout repository
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -31,33 +30,22 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Configure Git safe directory to bypass ownership restrictions on the runner
-          git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
-
-          # Current UTC date
           $nowUtc = [DateTime]::UtcNow
 
           $year = $nowUtc.ToString("yy")
           $month = $nowUtc.ToString("MM")
 
-          # First day of current month
           $startOfMonthIso = "$($nowUtc.ToString('yyyy-MM'))-01T00:00:00Z"
 
-          # Select reference pointer
           $targetRef = "HEAD"
 
           if ("${{ github.event_name }}" -eq "pull_request") {
               $targetRef = "HEAD^1"
           }
 
-          # Count commits
-          $commitCount = 0
-
           $gitOutput = & git rev-list --count --since="$startOfMonthIso" $targetRef 2>&1
 
           if ($LASTEXITCODE -ne 0) {
-              Write-Warning "Could not count commits using $targetRef. Retrying with HEAD."
-
               $gitOutput = & git rev-list --count --since="$startOfMonthIso" HEAD 2>&1
 
               if ($LASTEXITCODE -ne 0) {
@@ -67,83 +55,74 @@ jobs:
 
           $commitCountText = ($gitOutput | Select-Object -Last 1).ToString().Trim()
 
+          $commitCount = 0
+
           if (-not [int]::TryParse($commitCountText, [ref]$commitCount)) {
               throw "Invalid Git commit count: $commitCountText"
           }
 
-          # Ensure minimum counter is 1
           if ($commitCount -lt 1) {
               $commitCount = 1
           }
 
-          # Format counter
           $formattedCommits = $commitCount.ToString().PadLeft(4, '0')
 
-          # Assemble version string
           $computedVersion = "$year.$month.$formattedCommits"
 
           Write-Host "Calculated Application Version: v.$computedVersion"
 
-          # Export environment variable using UTF-8 without BOM to prevent parsing issues
-          $envContent = "APP_VERSION=$computedVersion" + [Environment]::NewLine
-
-          [System.IO.File]::AppendAllText(
-              $env:GITHUB_ENV,
-              $envContent,
-              [System.Text.UTF8Encoding]::new($false)
-          )
-
-          Write-Host "APP_VERSION successfully exported."
+          "APP_VERSION=$computedVersion" >> $env:GITHUB_ENV
 
       # 3. Install .NET 9 SDK
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '9.0.x'
 
-      # 4. Restore NuGet dependencies
+      # 4. Restore dependencies
       - name: Restore Dependencies
         run: dotnet restore
 
       # 5. Build application
       - name: Build Project
-        run: >
-          dotnet build
-          --configuration Release
-          --no-restore
-          /p:Version=${{ env.APP_VERSION }}
+        run: |
+          dotnet build \
+            --configuration Release \
+            --no-restore \
+            /p:Version=${{ env.APP_VERSION }}
 
-      # 6. Run unit tests
+      # 6. Run tests
       - name: Run Tests
-        run: >
-          dotnet test
-          --configuration Release
-          --no-build
-          --verbosity normal
+        run: |
+          dotnet test \
+            --configuration Release \
+            --no-build \
+            --verbosity normal
 
-      # 7.1. Publishing artifacts (builds) to GitHub Actions Storage
+      # 7. Upload build artifacts
       - name: Upload Build Artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: VSergeValidation-v${{ env.APP_VERSION }}
           path: |
             **/bin/Release/net9.0/*.dll
             **/bin/Release/net9.0/*.json
           retention-days: 30
-          
-      # 7.2. Collect and structure binary assets for release packaging
+
+      # 8. Prepare release package
       - name: Prepare Release Files
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
           mkdir staging
           cp VSergeValidation/bin/Release/net9.0/VSergeValidation.dll staging/
-          cd staging && zip -r ../VSergeValidation-v${{ env.APP_VERSION }}.zip .
+          cd staging
+          zip -r ../VSergeValidation-v${{ env.APP_VERSION }}.zip .
 
-      # 8. Create formal GitHub Release and publish binary packages dynamically
+      # 9. Create GitHub Release
       - name: Create GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.APP_VERSION }}
           name: Release v${{ env.APP_VERSION }}
